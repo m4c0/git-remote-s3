@@ -1,4 +1,5 @@
 #include "git-wrapper/repository.hpp"
+#include "ref_index.hpp"
 
 #include <aws/core/Aws.h>
 #include <git2.h>
@@ -8,6 +9,7 @@
 
 static void _push(git::repository & repo, std::string line) {
     git::revwalk walk = repo.revwalk_new();
+    ref_index idx;
 
     do {
         if (line.length() == 0) break;
@@ -22,7 +24,8 @@ static void _push(git::repository & repo, std::string line) {
 
         walk.push_ref(local);
 
-        std::cout << "ok " << remote << std::endl;
+        auto target = repo.reference_lookup(local).target();
+        idx[remote] = git_oid_tostr_s(target);
     } while (std::getline(std::cin, line));
 
     git_oid * oid;
@@ -30,7 +33,12 @@ static void _push(git::repository & repo, std::string line) {
         std::cerr << "oid: " << git_oid_tostr_s(oid) << std::endl;
     }
 
-    std::cout << std::endl;
+    idx.publish();
+}
+
+static void _list() {
+    s3_wrap s3;
+    std::cout << s3.slurp("ref.txt") << std::endl;
 }
 
 static void _run_command_loop() {
@@ -48,7 +56,7 @@ static void _run_command_loop() {
                 << "push"   << std::endl
                 << std::endl;
         } else if (line.find("list ") == 0) {
-            std::cout << std::endl;
+            _list();
         } else if (line.find("option ") == 0) {
             std::cout << "unsupported" << std::endl;
         } else if (line.find("push ") == 0) {
