@@ -1,11 +1,39 @@
 #include "git-wrapper/repository.hpp"
 #include "ref_index.hpp"
+#include "s3_wrap.hpp"
 
 #include <aws/core/Aws.h>
 #include <git2.h>
 
 #include <iostream>
 #include <regex>
+
+static void _push_oid(git::repository & repo, const git_oid * oid) {
+    auto odb = repo.odb();
+    auto obj = odb.read(oid);
+    s3_wrap().put(git_oid_tostr_s(oid), obj.data(), obj.size());
+
+    switch (obj.type()) {
+        case GIT_OBJ_COMMIT:
+            _push_oid(repo, repo.commit_lookup(oid).tree_id());
+            break;
+        case GIT_OBJ_TREE: {
+            auto tree = repo.tree_lookup(oid);
+            for (int i = 0; i < tree.entrycount(); i++) {
+                if (tree.entry_type(i) == GIT_OBJ_COMMIT) continue; // ignore submodules
+
+                _push_oid(repo, tree.entry_oid(i));
+            }
+            break;
+        }
+        case GIT_OBJ_BLOB:
+            // No further processing
+            break;
+        default:
+            std::cerr << "unsupported: " << obj.type() << std::endl;
+            break;
+    }
+}
 
 static void _push(git::repository & repo, std::string line) {
     git::revwalk walk = repo.revwalk_new();
@@ -28,9 +56,10 @@ static void _push(git::repository & repo, std::string line) {
         idx[remote] = git_oid_tostr_s(target);
     } while (std::getline(std::cin, line));
 
+
     git_oid * oid;
     while ((oid = walk.next()) != nullptr) {
-        std::cerr << "oid: " << git_oid_tostr_s(oid) << std::endl;
+        _push_oid(repo, oid);
     }
 
     idx.publish();
@@ -46,7 +75,7 @@ static void _run_command_loop() {
 
     std::string line;
     while (std::getline(std::cin, line)) {
-        //std::cerr << "got: " << line << std::endl;
+        std::cerr << "got: " << line << std::endl;
         if (line == "") {
             return;
         } else if (line == "capabilities") {
@@ -55,7 +84,7 @@ static void _run_command_loop() {
                 << "option" << std::endl
                 << "push"   << std::endl
                 << std::endl;
-        } else if (line.find("list ") == 0) {
+        } else if (line.find("list") == 0) {
             _list();
         } else if (line.find("option ") == 0) {
             std::cout << "unsupported" << std::endl;

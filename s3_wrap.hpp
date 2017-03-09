@@ -21,6 +21,8 @@ public:
         std::ofstream out { "build/" + key };
         out << content;
     }
+    void put(const std::string & key, const void * content, const size_t size) {
+    }
 
 private:
 };
